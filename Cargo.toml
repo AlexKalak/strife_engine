@@ -1,0 +1,11 @@
+[package]
+name = "strife"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fern={version= "0.7.1", features = ["colored"]}
+humantime="2.2.0"
+log="0.4.27"
+colored="3.0.0"
+winit = { version = "0.29", features = ["rwh_05"] }
