@@ -1,36 +1,41 @@
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     error::EventLoopError,
-    event::{self, DeviceId, ElementState, MouseButton},
+    event::{self, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent},
     event_loop::{EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
     keyboard::{KeyCode, PhysicalKey},
     window::{WindowBuilder, WindowId},
 };
 
 use crate::core::sf_events::{
-    self, Event, KeyPressedEvent, KeyReleasedEvent, MouseButtonPressedEvent,
-    MouseButtonReleasedEvent, MouseMoveEvent, TerminateWindowEvent, WindowCloseEvent,
+    self, Event, EventWrapper, Eventable, KeyPressedEvent, KeyReleasedEvent,
+    MouseButtonPressedEvent, MouseButtonReleasedEvent, MouseMoveEvent, WindowCloseEvent,
     WindowResizeEvent,
 };
 
 pub enum WindowManagerCustomEvents {
     TerminateWindow,
 }
-pub struct WindowManager<F>
+
+pub trait WindowEventHandler {
+    fn handle_event<T: Eventable>(&mut self, event: T);
+}
+
+pub struct WindowManager<H>
 where
-    F: Fn(&dyn Event),
+    H: WindowEventHandler,
 {
-    event_callback: F,
+    event_handler: H,
     pub event_loop_proxy: Option<EventLoopProxy<WindowManagerCustomEvents>>,
 }
 
-impl<F> WindowManager<F>
+impl<H> WindowManager<H>
 where
-    F: Fn(&dyn Event),
+    H: WindowEventHandler,
 {
-    pub fn new(event_callback: F) -> WindowManager<F> {
+    pub fn new(event_handler: H) -> WindowManager<H> {
         Self {
-            event_callback,
+            event_handler,
             event_loop_proxy: None,
         }
     }
@@ -93,35 +98,39 @@ where
         });
     }
 
-    fn handle_window_close_event(&self, window_id: WindowId) {
+    fn handle_window_close_event(&mut self, window_id: WindowId) {
         let event = WindowCloseEvent {
             name: String::from("WINDOW CLOSE EVENT"),
             is_handled: false,
             window_id,
         };
 
-        self.call_event(&event);
+        self.call_event(event);
     }
 
-    fn handle_keyboard_input(&self, state: &ElementState, keycode: &KeyCode, repeat: bool) {
+    fn handle_keyboard_input(&mut self, state: &ElementState, keycode: &KeyCode, repeat: bool) {
         let is_pressed = *state == ElementState::Pressed;
 
         match is_pressed {
-            true => self.call_event(&KeyPressedEvent {
+            true => self.call_event(KeyPressedEvent {
                 name: String::from("KeyPressedEvent"),
                 repeat,
                 is_handled: false,
                 keycode: *keycode,
             }),
-            false => self.call_event(&KeyReleasedEvent {
+            false => self.call_event(KeyReleasedEvent {
                 name: String::from("KeyRELEASED EVENT"),
-                is_handled: false,
                 keycode: *keycode,
+                is_handled: false,
             }),
         };
     }
 
-    fn handle_window_resized_event(&self, window_id: WindowId, physical_size: &PhysicalSize<u32>) {
+    fn handle_window_resized_event(
+        &mut self,
+        window_id: WindowId,
+        physical_size: &PhysicalSize<u32>,
+    ) {
         let event = WindowResizeEvent {
             name: String::from("WINDOW RESIZE EVENT"),
             is_handled: false,
@@ -130,20 +139,25 @@ where
             height: physical_size.height,
         };
 
-        self.call_event(&event);
+        self.call_event(event);
     }
 
-    fn handle_mouse_input(&self, state: &ElementState, button: MouseButton, device_id: DeviceId) {
+    fn handle_mouse_input(
+        &mut self,
+        state: &ElementState,
+        button: MouseButton,
+        device_id: DeviceId,
+    ) {
         let is_pressed = *state == ElementState::Pressed;
 
         match is_pressed {
-            true => self.call_event(&MouseButtonPressedEvent {
+            true => self.call_event(MouseButtonPressedEvent {
                 name: String::from("MousePressedEvent"),
                 button,
                 is_handled: false,
                 device_id,
             }),
-            false => self.call_event(&MouseButtonReleasedEvent {
+            false => self.call_event(MouseButtonReleasedEvent {
                 name: String::from("MouseReleasedEvent"),
                 button,
                 is_handled: false,
@@ -152,7 +166,7 @@ where
         };
     }
 
-    fn handle_mouse_move_event(&self, device_id: DeviceId, position: &PhysicalPosition<f64>) {
+    fn handle_mouse_move_event(&mut self, device_id: DeviceId, position: &PhysicalPosition<f64>) {
         let event = MouseMoveEvent {
             name: String::from("WINDOW MOUSE MOVE EVENT"),
             is_handled: false,
@@ -161,10 +175,10 @@ where
             y: position.y,
         };
 
-        self.call_event(&event);
+        self.call_event(event);
     }
 
-    fn call_event(&self, event: &dyn Event) {
-        (self.event_callback)(event);
+    fn call_event<T: Eventable>(&mut self, event: T) {
+        self.event_handler.handle_event(event);
     }
 }

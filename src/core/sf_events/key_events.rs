@@ -1,11 +1,4 @@
-use super::Event;
-
-pub trait EventKey: Event {
-    fn get_keycode(&self) -> winit::keyboard::KeyCode;
-}
-pub trait EventKeyPressed: EventKey {
-    fn get_repeat(&self) -> bool;
-}
+use super::Eventable;
 
 //Key Pressed
 #[derive(Debug)]
@@ -16,20 +9,25 @@ pub struct KeyPressedEvent {
     pub is_handled: bool,
 }
 
-impl Event for KeyPressedEvent {
+impl Eventable for KeyPressedEvent {
     fn get_name(&self) -> &str {
         &self.name
     }
-}
 
-impl EventKey for KeyPressedEvent {
-    fn get_keycode(&self) -> winit::keyboard::KeyCode {
-        self.keycode
+    fn to_string(&self) -> String {
+        format!("Event {}, keycode: {:?}", &self.name, &self.keycode)
+    }
+
+    fn is_handled(&self) -> bool {
+        self.is_handled
     }
 }
 
-impl EventKeyPressed for KeyPressedEvent {
-    fn get_repeat(&self) -> bool {
+impl KeyPressedEvent {
+    pub fn get_keycode(&self) -> winit::keyboard::KeyCode {
+        self.keycode
+    }
+    pub fn get_repeat(&self) -> bool {
         self.repeat
     }
 }
@@ -42,14 +40,20 @@ pub struct KeyReleasedEvent {
     pub is_handled: bool,
 }
 
-impl Event for KeyReleasedEvent {
+impl Eventable for KeyReleasedEvent {
     fn get_name(&self) -> &str {
         &self.name
     }
+    fn is_handled(&self) -> bool {
+        self.is_handled
+    }
+    fn to_string(&self) -> String {
+        format!("Event {}, keycode: {:?}", &self.name, &self.keycode)
+    }
 }
 
-impl EventKey for KeyReleasedEvent {
-    fn get_keycode(&self) -> winit::keyboard::KeyCode {
+impl KeyReleasedEvent {
+    pub fn get_keycode(&self) -> winit::keyboard::KeyCode {
         self.keycode
     }
 }

@@ -1,4 +1,12 @@
-use crate::core::{sf_events::MouseMoveEvent, sf_layers};
+use std::any::Any;
+
+use crate::{
+    core::{
+        sf_events::{Eventable, WindowResizeEvent},
+        sf_layers,
+    },
+    info_client, info_core,
+};
 
 pub struct TestLayer {
     pub name: String,
@@ -22,7 +30,10 @@ impl sf_layers::Layer for TestLayer {
     fn on_update(&mut self) {
         todo!()
     }
-    fn on_event(&mut self, event: &dyn crate::core::sf_events::Event) {
-        if let Some(e) = event.downcast_ref::<MouseMoveEvent>() {}
+    fn on_event(&mut self, event: &dyn Eventable) {
+        let any = event as &dyn Any;
+        if let Some(e) = any.downcast_ref::<WindowResizeEvent>() {
+            info_client!("HELLO {}", e.to_string());
+        }
     }
 }

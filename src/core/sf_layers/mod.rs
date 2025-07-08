@@ -1,4 +1,4 @@
-use super::sf_events::Event;
+use super::sf_events::{Event, Eventable};
 
 pub struct LayerStack<'a> {
     layers: Vec<&'a dyn Layer>,
@@ -27,5 +27,5 @@ pub trait Layer {
     fn on_attach(&mut self);
     fn on_detach(&mut self);
     fn on_update(&mut self);
-    fn on_event(&mut self, event: &dyn Event);
+    fn on_event(&mut self, event: &dyn Eventable);
 }

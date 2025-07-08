@@ -1,14 +1,6 @@
 use winit::event::{DeviceId, MouseButton};
 
-use super::Event;
-
-pub trait EventMouse: Event {
-    fn get_device_id(&self) -> &DeviceId;
-}
-
-pub trait EventMouseMove: EventMouse {
-    fn get_pos(&self) -> (f64, f64);
-}
+use super::Eventable;
 
 //Key Pressed
 #[derive(Debug)]
@@ -20,22 +12,23 @@ pub struct MouseMoveEvent {
     pub device_id: DeviceId,
 }
 
-impl Event for MouseMoveEvent {
+impl Eventable for MouseMoveEvent {
     fn get_name(&self) -> &str {
         &self.name
     }
     fn to_string(&self) -> String {
         format!("{}: x- {}, y- {}", self.name, self.x, self.y)
     }
-}
-
-impl EventMouse for MouseMoveEvent {
-    fn get_device_id(&self) -> &DeviceId {
-        &self.device_id
+    fn is_handled(&self) -> bool {
+        self.is_handled
     }
 }
-impl EventMouseMove for MouseMoveEvent {
-    fn get_pos(&self) -> (f64, f64) {
+
+impl MouseMoveEvent {
+    pub fn get_device_id(&self) -> &DeviceId {
+        &self.device_id
+    }
+    pub fn get_pos(&self) -> (f64, f64) {
         (self.x, self.y)
     }
 }
@@ -51,9 +44,6 @@ fn mouse_button_to_string(button: &MouseButton) -> String {
         MouseButton::Other(val) => format!("button {}", val),
     }
 }
-pub trait EventMouseButtonPressed: EventMouse {
-    fn get_button(&self) -> &MouseButton;
-}
 
 #[derive(Debug)]
 pub struct MouseButtonPressedEvent {
@@ -63,7 +53,7 @@ pub struct MouseButtonPressedEvent {
     pub button: MouseButton,
 }
 
-impl Event for MouseButtonPressedEvent {
+impl Eventable for MouseButtonPressedEvent {
     fn get_name(&self) -> &str {
         &self.name
     }
@@ -74,23 +64,19 @@ impl Event for MouseButtonPressedEvent {
             mouse_button_to_string(&self.button)
         )
     }
-}
-impl EventMouse for MouseButtonPressedEvent {
-    fn get_device_id(&self) -> &DeviceId {
-        &self.device_id
+    fn is_handled(&self) -> bool {
+        self.is_handled
     }
 }
-impl EventMouseButtonPressed for MouseButtonPressedEvent {
+impl MouseButtonPressedEvent {
+    pub fn get_device_id(&self) -> &DeviceId {
+        &self.device_id
+    }
     fn get_button(&self) -> &MouseButton {
         &self.button
     }
 }
-
 //Mouse Released Event
-
-pub trait EventMouseButtonReleased: EventMouse {
-    fn get_button(&self) -> &MouseButton;
-}
 
 #[derive(Debug)]
 pub struct MouseButtonReleasedEvent {
@@ -100,7 +86,7 @@ pub struct MouseButtonReleasedEvent {
     pub button: MouseButton,
 }
 
-impl Event for MouseButtonReleasedEvent {
+impl Eventable for MouseButtonReleasedEvent {
     fn get_name(&self) -> &str {
         &self.name
     }
@@ -111,14 +97,15 @@ impl Event for MouseButtonReleasedEvent {
             mouse_button_to_string(&self.button)
         )
     }
-}
-impl EventMouse for MouseButtonReleasedEvent {
-    fn get_device_id(&self) -> &DeviceId {
-        &self.device_id
+    fn is_handled(&self) -> bool {
+        self.is_handled
     }
 }
-impl EventMouseButtonReleased for MouseButtonReleasedEvent {
-    fn get_button(&self) -> &MouseButton {
+impl MouseButtonReleasedEvent {
+    pub fn get_device_id(&self) -> &DeviceId {
+        &self.device_id
+    }
+    pub fn get_button(&self) -> &MouseButton {
         &self.button
     }
 }
