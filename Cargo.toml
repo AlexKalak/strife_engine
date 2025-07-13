@@ -10,4 +10,6 @@ log="0.4.27"
 colored="3.0.0"
 egui = "0.32.0"
 egui-winit = "0.32.0"
+egui-wgpu = "0.32.0"
 winit = { version = "*", features = ["rwh_05"] }
+wgpu ={ version ="*", features = ["webgpu", "webgl"]}

@@ -6,10 +6,12 @@ use std::{
 
 use event_system::EventSystem;
 use layers::TestLayer;
+use winit::dpi::PhysicalSize;
 
 use crate::{
     core::{
         sf_events::{EventListener, Eventable, MouseMoveEvent},
+        sf_graphics,
         sf_gui::{self, SfGuiLayer},
         sf_layers::Layer,
     },
@@ -66,7 +68,15 @@ impl<'a> Application<'a> {
         let mut window_manager = sf_window::WindowManager::<EventListenerForWindow>::new(None);
         let window = window_manager.get_window_shared();
 
-        self.sf_gui_layer = Some(Box::new(SfGuiLayer::new("hello".to_string(), window)));
+        let window_ref = window.borrow();
+        let graphics =
+            sf_graphics::wgpu_backend::WgpuGraphics::new(&window_ref, window_ref.inner_size());
+
+        self.sf_gui_layer = Some(Box::new(SfGuiLayer::new(
+            "hello".to_string(),
+            window,
+            graphics,
+        )));
 
         self.event_system
             .layer_stack
