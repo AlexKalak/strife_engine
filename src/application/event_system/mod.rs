@@ -1,25 +1,39 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
+
+use winit::event::WindowEvent;
 
 use crate::{
-    core::sf_events::{EventDispatcher, EventWrapper, Eventable, WindowResizeEvent},
-    debug_core, info_client,
+    core::{
+        sf_events::{EventDispatcher, Eventable, WindowRedrawRequestedEvent},
+        sf_layers::LayerStack,
+    },
+    info_core,
 };
 
-pub struct EventSystem {
-    pub event_dispatcher: EventDispatcher,
+pub struct EventSystem<'a> {
+    pub layer_stack: LayerStack<'a>,
+    pub non_layer_event_dispatcher: EventDispatcher,
 }
 
-impl EventSystem {
-    pub fn new() -> EventSystem {
+impl<'a> EventSystem<'a> {
+    pub fn new() -> EventSystem<'a> {
         Self {
-            event_dispatcher: EventDispatcher::new(),
+            layer_stack: LayerStack::new(),
+            non_layer_event_dispatcher: EventDispatcher::new(),
         }
     }
 
     pub fn on_event<E: Eventable>(&mut self, event: E) {
-        let s = event.to_string();
-        debug_core!(s);
+        if event.type_id() == TypeId::of::<WindowRedrawRequestedEvent>() {
+            for layer in self.layer_stack.layers.iter_mut().rev() {
+                layer.on_update();
+            }
+            return;
+        }
 
-        self.event_dispatcher.dispatch(event);
+        self.non_layer_event_dispatcher.dispatch(&event);
+        for layer in self.layer_stack.layers.iter_mut().rev() {
+            layer.on_event(&event);
+        }
     }
 }

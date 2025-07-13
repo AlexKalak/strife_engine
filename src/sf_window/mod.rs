@@ -1,101 +1,109 @@
+use std::{cell::RefCell, rc::Rc};
+
+use egui::ViewportId;
+use egui_winit::State;
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     error::EventLoopError,
     event::{self, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent},
-    event_loop::{EventLoop, EventLoopBuilder, EventLoopProxy, EventLoopWindowTarget},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopBuilder, EventLoopProxy},
     keyboard::{KeyCode, PhysicalKey},
-    window::{WindowBuilder, WindowId},
+    window::{Window, WindowAttributes, WindowId},
 };
 
 use crate::core::sf_events::{
-    self, Event, EventWrapper, Eventable, KeyPressedEvent, KeyReleasedEvent,
-    MouseButtonPressedEvent, MouseButtonReleasedEvent, MouseMoveEvent, WindowCloseEvent,
+    self, Event, Eventable, KeyPressedEvent, KeyReleasedEvent, MouseButtonPressedEvent,
+    MouseButtonReleasedEvent, MouseMoveEvent, WindowCloseEvent, WindowRedrawRequestedEvent,
     WindowResizeEvent,
 };
 
-pub enum WindowManagerCustomEvents {
+pub enum WindowManagerCustomEvent {
     TerminateWindow,
 }
 
-pub trait WindowEventHandler {
-    fn handle_event<T: Eventable>(&mut self, event: T);
+pub trait WindowEventListener {
+    fn on_raw_window_event(&mut self, event: winit::event::WindowEvent);
+    fn on_handled_event<T: Eventable>(&mut self, event: T);
 }
 
-pub struct WindowManager<H>
+pub struct WindowEventHandler<H>
 where
-    H: WindowEventHandler,
+    H: WindowEventListener,
 {
-    event_handler: H,
-    pub event_loop_proxy: Option<EventLoopProxy<WindowManagerCustomEvents>>,
+    event_listener: Option<H>,
 }
 
-impl<H> WindowManager<H>
+impl<H> WindowEventHandler<H>
 where
-    H: WindowEventHandler,
+    H: WindowEventListener,
 {
-    pub fn new(event_handler: H) -> WindowManager<H> {
-        Self {
-            event_handler,
-            event_loop_proxy: None,
-        }
+    fn new(event_listener: Option<H>) -> WindowEventHandler<H> {
+        Self { event_listener }
     }
-
-    pub fn run(&mut self) {
-        let event_loop = EventLoopBuilder::<WindowManagerCustomEvents>::with_user_event()
-            .build()
-            .unwrap();
-
-        let event_loop_proxy = event_loop.create_proxy();
-        self.event_loop_proxy = Some(event_loop_proxy);
-
-        let window = WindowBuilder::new().build(&event_loop).unwrap();
-
-        let _ = event_loop.run(move |event, elwt| match event {
+    fn handle_window_event(
+        &mut self,
+        event: &winit::event::Event<WindowManagerCustomEvent>,
+        elwt: &ActiveEventLoop,
+        window: &Window,
+    ) {
+        match *event {
             winit::event::Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == window.id() => match event {
-                event::WindowEvent::CloseRequested { .. } => {
-                    self.handle_window_close_event(window_id);
-                    elwt.exit();
-                }
-                event::WindowEvent::KeyboardInput {
-                    event:
-                        event::KeyEvent {
-                            state,
-                            physical_key: PhysicalKey::Code(keycode),
-                            repeat,
-                            ..
-                        },
-                    ..
-                } => {
-                    self.handle_keyboard_input(state, keycode, *repeat);
-                }
-                event::WindowEvent::Resized(physical_size) => {
-                    self.handle_window_resized_event(window_id, physical_size);
-                }
-                event::WindowEvent::MouseInput {
-                    device_id,
-                    state,
-                    button,
-                } => {
-                    self.handle_mouse_input(state, *button, *device_id);
-                }
-                event::WindowEvent::CursorMoved {
-                    device_id,
-                    position,
-                } => {
-                    self.handle_mouse_move_event(*device_id, position);
+            } if window_id == window.id() => {
+                match &mut self.event_listener {
+                    Some(e) => e.on_raw_window_event(event.clone()),
+                    None => {}
                 }
 
-                _ => {}
-            },
+                match event {
+                    event::WindowEvent::CloseRequested { .. } => {
+                        self.handle_window_close_event(window_id);
+                        elwt.exit();
+                    }
+                    event::WindowEvent::RedrawRequested {} => {
+                        window.request_redraw();
+                        self.handle_redraw_requested_event(window_id);
+                    }
+                    event::WindowEvent::KeyboardInput {
+                        event:
+                            event::KeyEvent {
+                                state,
+                                physical_key: PhysicalKey::Code(keycode),
+                                repeat,
+                                ..
+                            },
+                        ..
+                    } => {
+                        self.handle_keyboard_input(state, keycode, *repeat);
+                    }
+                    event::WindowEvent::Resized(physical_size) => {
+                        self.handle_window_resized_event(window_id, physical_size);
+                    }
+                    event::WindowEvent::MouseInput {
+                        device_id,
+                        state,
+                        button,
+                    } => {
+                        self.handle_mouse_input(state, *button, *device_id);
+                    }
+                    event::WindowEvent::CursorMoved {
+                        device_id,
+                        position,
+                    } => {
+                        self.handle_mouse_move_event(*device_id, position);
+                    }
 
-            winit::event::Event::UserEvent(WindowManagerCustomEvents::TerminateWindow) => {
+                    _ => {}
+                }
+            }
+
+            winit::event::Event::UserEvent(WindowManagerCustomEvent::TerminateWindow) => {
                 elwt.exit()
             }
+
             _ => {}
-        });
+        };
     }
 
     fn handle_window_close_event(&mut self, window_id: WindowId) {
@@ -105,20 +113,29 @@ where
             window_id,
         };
 
-        self.call_event(event);
+        self.on_handled_event(event);
+    }
+    fn handle_redraw_requested_event(&mut self, window_id: WindowId) {
+        let event = WindowRedrawRequestedEvent {
+            name: String::from("WINDOW REDRAW REQUESTED EVENT"),
+            is_handled: false,
+            window_id,
+        };
+
+        self.on_handled_event(event);
     }
 
     fn handle_keyboard_input(&mut self, state: &ElementState, keycode: &KeyCode, repeat: bool) {
         let is_pressed = *state == ElementState::Pressed;
 
         match is_pressed {
-            true => self.call_event(KeyPressedEvent {
+            true => self.on_handled_event(KeyPressedEvent {
                 name: String::from("KeyPressedEvent"),
                 repeat,
                 is_handled: false,
                 keycode: *keycode,
             }),
-            false => self.call_event(KeyReleasedEvent {
+            false => self.on_handled_event(KeyReleasedEvent {
                 name: String::from("KeyRELEASED EVENT"),
                 keycode: *keycode,
                 is_handled: false,
@@ -139,7 +156,7 @@ where
             height: physical_size.height,
         };
 
-        self.call_event(event);
+        self.on_handled_event(event);
     }
 
     fn handle_mouse_input(
@@ -151,13 +168,13 @@ where
         let is_pressed = *state == ElementState::Pressed;
 
         match is_pressed {
-            true => self.call_event(MouseButtonPressedEvent {
+            true => self.on_handled_event(MouseButtonPressedEvent {
                 name: String::from("MousePressedEvent"),
                 button,
                 is_handled: false,
                 device_id,
             }),
-            false => self.call_event(MouseButtonReleasedEvent {
+            false => self.on_handled_event(MouseButtonReleasedEvent {
                 name: String::from("MouseReleasedEvent"),
                 button,
                 is_handled: false,
@@ -175,10 +192,62 @@ where
             y: position.y,
         };
 
-        self.call_event(event);
+        self.on_handled_event(event);
     }
 
-    fn call_event<T: Eventable>(&mut self, event: T) {
-        self.event_handler.handle_event(event);
+    fn on_handled_event<T: Eventable>(&mut self, event: T) {
+        if let Some(e) = &mut self.event_listener {
+            e.on_handled_event(event);
+        }
+    }
+}
+
+pub struct WindowManager<H>
+where
+    H: WindowEventListener,
+{
+    pub event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
+    window: Rc<RefCell<Window>>,
+    event_loop: winit::event_loop::EventLoop<WindowManagerCustomEvent>,
+    event_handler: WindowEventHandler<H>,
+}
+
+impl<H> WindowManager<H>
+where
+    H: WindowEventListener,
+{
+    pub fn new(event_listener: Option<H>) -> WindowManager<H> {
+        let event_handler = WindowEventHandler::new(event_listener);
+
+        let event_loop = EventLoop::<WindowManagerCustomEvent>::with_user_event()
+            .build()
+            .unwrap();
+
+        let event_loop_proxy = event_loop.create_proxy();
+        let window = Rc::new(RefCell::new(
+            event_loop.create_window(WindowAttributes::new()).unwrap(),
+        ));
+
+        Self {
+            window,
+            event_loop,
+            event_handler,
+            event_loop_proxy,
+        }
+    }
+
+    pub fn set_event_listener(&mut self, event_listener: Option<H>) {
+        self.event_handler.event_listener = event_listener;
+    }
+
+    pub fn get_window_shared(&self) -> Rc<RefCell<Window>> {
+        Rc::clone(&self.window)
+    }
+
+    pub fn run(mut self) {
+        let _ = self.event_loop.run(move |event, elwt| {
+            self.event_handler
+                .handle_window_event(&event, elwt, &self.window.borrow())
+        });
     }
 }

@@ -1,17 +1,24 @@
-use super::sf_events::{Event, Eventable};
+use super::sf_events::Eventable;
 
 pub struct LayerStack<'a> {
-    layers: Vec<&'a dyn Layer>,
+    pub layers: Vec<&'a mut dyn Layer>,
     layer_insert_index: usize,
 }
 
 impl<'a> LayerStack<'a> {
-    pub fn push_layer(&mut self, layer: &'a dyn Layer) {
+    pub fn new() -> LayerStack<'a> {
+        Self {
+            layers: Vec::new(),
+            layer_insert_index: 0,
+        }
+    }
+
+    pub fn push_layer(&mut self, layer: &'a mut dyn Layer) {
         self.layers.insert(self.layer_insert_index, layer);
         self.layer_insert_index += 1;
     }
-    pub fn push_overlay(&mut self, layer: &'a dyn Layer) {
-        self.layers.push(layer);
+    pub fn push_overlay(&mut self, overlay: &'a mut dyn Layer) {
+        self.layers.push(overlay);
     }
 
     pub fn pop_layer(&mut self) {

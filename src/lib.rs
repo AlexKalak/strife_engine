@@ -1,3 +1,5 @@
+use core::sf_layers::Layer;
+
 use application::Application;
 
 pub mod application;
@@ -6,6 +8,7 @@ pub mod sf_log;
 pub mod sf_window;
 
 pub fn entry_point() {
-    let application = Application::new();
+    let mut application = Application::new();
+
     application.run();
 }

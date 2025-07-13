@@ -1,4 +1,14 @@
-use winit::window::WindowId;
+use winit::{event::WindowEvent, window::WindowId};
+
+impl Eventable for WindowEvent {
+    fn get_name(&self) -> &str {
+        "Window Event"
+    }
+
+    fn is_handled(&self) -> bool {
+        false
+    }
+}
 
 use super::Eventable;
 
@@ -52,5 +62,31 @@ impl Eventable for WindowResizeEvent {
 impl WindowResizeEvent {
     pub fn get_width_and_height(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+}
+
+#[derive(Debug)]
+pub struct WindowRedrawRequestedEvent {
+    pub name: String,
+    pub window_id: WindowId,
+    pub is_handled: bool,
+}
+
+impl Eventable for WindowRedrawRequestedEvent {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+    fn to_string(&self) -> String {
+        format!("{}", self.name)
+    }
+
+    fn is_handled(&self) -> bool {
+        self.is_handled
+    }
+}
+
+impl WindowRedrawRequestedEvent {
+    pub fn get_window_id(&self) -> &WindowId {
+        &self.window_id
     }
 }

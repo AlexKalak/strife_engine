@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
 };
 
-use crate::info_core;
+use crate::{info_core, warn_core};
 
 #[derive(Debug)]
 pub enum EventCategory {
@@ -16,10 +16,6 @@ pub enum EventCategory {
     MouseButtonCategory = 1 << 4,
     UserCategory = 1 << 5,
 }
-pub trait EventWrapper {
-    fn get_inner_payload(&self) -> &dyn Eventable;
-}
-
 pub trait Eventable: Any + Send + Sync + 'static {
     fn get_name(&self) -> &str;
 
@@ -36,12 +32,6 @@ pub trait Eventable: Any + Send + Sync + 'static {
 pub struct Event<'a, T> {
     pub event_type: T,
     pub event_payload: &'a dyn Eventable,
-}
-
-impl<'a, T: 'static> EventWrapper for Event<'a, T> {
-    fn get_inner_payload(&self) -> &dyn Eventable {
-        self.event_payload
-    }
 }
 
 pub trait EventListener {
@@ -61,7 +51,8 @@ where
         if let Some(concrete_payload) =
             (payload as &dyn Any).downcast_ref::<L::EventableConcreteType>()
         {
-            self.handle(concrete_payload)
+            let handled = self.handle(concrete_payload);
+            handled
         } else {
             false
         }
@@ -95,14 +86,26 @@ impl EventDispatcher {
             .for_each(|(key, value)| info_core!("{}", format!("{:?}: {:?}", key, value.len())));
     }
 
-    pub fn dispatch<T>(&mut self, event: T)
+    pub fn dispatch_dynamic(&mut self, event: &dyn Eventable) {
+        let type_id = event.get_type_id();
+        if let Some(listeners) = self.event_listeners.get_mut(&type_id) {
+            for listener in listeners.iter_mut() {
+                let handled = listener.handle_erased(event);
+                if handled {
+                    break;
+                }
+            }
+        }
+    }
+
+    pub fn dispatch<T>(&mut self, event: &T)
     where
         T: Eventable,
     {
         let type_id = std::any::TypeId::of::<T>();
         if let Some(listeners) = self.event_listeners.get_mut(&type_id) {
             for listener in listeners.iter_mut() {
-                let handled = listener.handle_erased(&event);
+                let handled = listener.handle_erased(event);
                 if handled {
                     break;
                 }

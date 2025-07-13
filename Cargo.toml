@@ -8,4 +8,6 @@ fern={version= "0.7.1", features = ["colored"]}
 humantime="2.2.0"
 log="0.4.27"
 colored="3.0.0"
-winit = { version = "0.29", features = ["rwh_05"] }
+egui = "0.32.0"
+egui-winit = "0.32.0"
+winit = { version = "*", features = ["rwh_05"] }
