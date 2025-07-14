@@ -6,7 +6,11 @@ use std::{
 
 use event_system::EventSystem;
 use layers::TestLayer;
-use winit::dpi::PhysicalSize;
+use winit::{
+    dpi::PhysicalSize,
+    event_loop::{EventLoop, EventLoopProxy},
+    window::{Window, WindowAttributes},
+};
 
 use crate::{
     core::{
@@ -15,7 +19,7 @@ use crate::{
         sf_gui::{self, SfGuiLayer},
         sf_layers::Layer,
     },
-    sf_window::{self},
+    sf_window::{self, WindowManager, WindowManagerCustomEvent},
 };
 
 pub mod event_system;
@@ -43,50 +47,41 @@ impl EventListener for MouseMoveListener {
         false
     }
 }
-pub struct Application<'a> {
-    pub event_system: EventSystem<'a>,
-    pub sf_gui_layer: Option<Box<SfGuiLayer>>,
-    layers: Vec<Box<dyn Layer>>,
-}
 
-impl<'a> Application<'a> {
-    pub fn new() -> Application<'a> {
-        let event_system = EventSystem::<'a>::new();
+pub async fn run() {
+    let mut event_system = EventSystem::new();
 
-        Self {
-            event_system,
-            sf_gui_layer: None,
-            layers: Vec::new(),
-        }
-    }
+    let event_loop = EventLoop::<WindowManagerCustomEvent>::with_user_event()
+        .build()
+        .unwrap();
 
-    pub fn run(&'a mut self) {
-        self.event_system
-            .non_layer_event_dispatcher
-            .add_listener(MouseMoveListener);
+    let event_loop_proxy = event_loop.create_proxy();
 
-        let mut window_manager = sf_window::WindowManager::<EventListenerForWindow>::new(None);
-        let window = window_manager.get_window_shared();
+    let window = event_loop.create_window(WindowAttributes::new()).unwrap();
 
-        let window_ref = window.borrow();
-        let graphics =
-            sf_graphics::wgpu_backend::WgpuGraphics::new(&window_ref, window_ref.inner_size());
+    let mut window_manager = sf_window::WindowManager::<EventListenerForWindow>::new(
+        None,
+        event_loop,
+        event_loop_proxy,
+        &window,
+    );
 
-        self.sf_gui_layer = Some(Box::new(SfGuiLayer::new(
-            "hello".to_string(),
-            window,
-            graphics,
-        )));
+    event_system
+        .non_layer_event_dispatcher
+        .add_listener(MouseMoveListener);
 
-        self.event_system
-            .layer_stack
-            .push_overlay(&mut **self.sf_gui_layer.as_mut().unwrap());
+    let graphics = sf_graphics::wgpu_backend::WgpuGraphics::new(&window, window.inner_size()).await;
 
-        let window_event_listener = EventListenerForWindow::<'a> {
-            event_sys: &mut self.event_system,
-        };
+    let mut sf_gui_layer = SfGuiLayer::new("hello".to_string(), &window, &graphics);
 
-        window_manager.set_event_listener(Some(window_event_listener));
-        window_manager.run();
-    }
+    event_system
+        .layer_stack
+        .push_overlay(&mut (*sf_gui_layer.get_layer().borrow_mut()));
+
+    let window_event_listener = EventListenerForWindow {
+        event_sys: &mut event_system,
+    };
+
+    window_manager.set_event_listener(Some(window_event_listener));
+    window_manager.run();
 }

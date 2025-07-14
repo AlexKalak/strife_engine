@@ -38,7 +38,10 @@ pub static LOGGER_INSTANCE: OnceLock<Logger> = OnceLock::new();
 pub fn init() -> Option<&'static Logger> {
     let inst = LOGGER_INSTANCE.get_or_init(|| match setup_logger() {
         Ok(..) => Logger { is_init: true },
-        Err(..) => Logger { is_init: false },
+        Err(e) => {
+            println!("{}", e);
+            Logger { is_init: false }
+        }
     });
 
     if inst.is_init {
@@ -67,6 +70,10 @@ fn setup_logger() -> Result<(), fern::InitError> {
             ))
         })
         .level(log::LevelFilter::max())
+        .level_for("wgpu", log::LevelFilter::Warn)
+        .level_for("wgpu_core", log::LevelFilter::Warn)
+        .level_for("wgpu_hal", log::LevelFilter::Warn)
+        .level_for("naga", log::LevelFilter::Warn)
         .chain(std::io::stdout())
         .chain(fern::log_file("output.log")?)
         .apply()?;

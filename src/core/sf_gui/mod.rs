@@ -13,43 +13,83 @@ use winit::{event::WindowEvent, window::WindowId};
 
 use crate::{info_core, warn_core};
 
-use super::{sf_graphics::wgpu_backend::WgpuGraphics, sf_layers::Layer};
+use super::{
+    sf_events::{EventDispatcher, EventListener, WindowResizeEvent},
+    sf_graphics::wgpu_backend::WgpuGraphics,
+    sf_layers::Layer,
+};
 
-pub struct SfGuiLayer {
+pub struct SfGuiLayer<'a> {
+    sf_gui_layer_core: Rc<RefCell<SfGuiLayerCore<'a>>>,
+    sf_gui_window_resize_listener: SfGuiWindowResizeListener<'a>,
+}
+
+impl<'a> SfGuiLayer<'a> {
+    pub fn new(name: String, window: &'a Window, graphics: &'a WgpuGraphics<'a>) -> Self {
+        let sf_gui_layer_core_rc =
+            Rc::new(RefCell::new(SfGuiLayerCore::new(name, window, graphics)));
+
+        let sf_gui_window_resize_listener = SfGuiWindowResizeListener {
+            sf_gui_layer_core: sf_gui_layer_core_rc.clone(),
+        };
+
+        Self {
+            sf_gui_layer_core: sf_gui_layer_core_rc.clone(),
+            sf_gui_window_resize_listener,
+        }
+    }
+
+    pub fn get_layer(&mut self) -> Rc<RefCell<SfGuiLayerCore<'a>>> {
+        self.sf_gui_layer_core.clone()
+    }
+}
+
+struct SfGuiWindowResizeListener<'a> {
+    sf_gui_layer_core: Rc<RefCell<SfGuiLayerCore<'a>>>,
+}
+impl<'a> EventListener for SfGuiWindowResizeListener<'a> {
+    type EventableConcreteType = WindowResizeEvent;
+
+    fn handle(&mut self, event: &Self::EventableConcreteType) -> bool {
+        (*self.sf_gui_layer_core.borrow())
+            .egui_context
+            .set_pixels_per_point((*self.sf_gui_layer_core.borrow()).window.scale_factor() as f32);
+        false
+    }
+}
+
+struct SfGuiLayerCore<'a> {
     name: String,
-    window: Rc<RefCell<Window>>,
-    graphics: Rc<RefCell<WgpuGraphics>>,
+    graphics: &'a WgpuGraphics<'a>,
+    window: &'a Window,
     egui_context: egui::Context,
     egui_winit_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
+    event_dispatcher: EventDispatcher,
 }
 
-impl SfGuiLayer {
-    pub fn new(
-        name: String,
-        window: Rc<RefCell<Window>>,
-        graphics: Rc<RefCell<WgpuGraphics>>,
-    ) -> SfGuiLayer {
+impl<'a> SfGuiLayerCore<'a> {
+    pub fn new(name: String, window: &'a Window, graphics: &'a WgpuGraphics<'a>) -> Self {
         let egui_context = egui::Context::default();
 
         let egui_winit_state = State::new(
             egui_context.clone(),
             egui_context.viewport_id(),
-            &*window.borrow(),
+            window,
             None,
             None,
             None,
         );
 
-        let graphics_ref = graphics.borrow();
-
         let egui_renderer = Renderer::new(
-            graphics_ref.device,
-            graphics_ref.surface_config.format,
+            &graphics.device,
+            graphics.surface_config.format,
             None,
             1,
             false,
         );
+
+        let event_dispatcher = EventDispatcher::new();
 
         Self {
             name,
@@ -58,6 +98,7 @@ impl SfGuiLayer {
             egui_context,
             egui_winit_state,
             egui_renderer,
+            event_dispatcher,
         }
     }
 
@@ -65,13 +106,15 @@ impl SfGuiLayer {
         &mut self,
         event: &egui_winit::winit::event::WindowEvent,
     ) -> EventResponse {
-        warn_core!("WINDOW EVENT IN GUI ON WINDOW EVENT: {:?}", event);
-        self.egui_winit_state
-            .on_window_event(&*self.window.borrow(), event)
+        self.egui_winit_state.on_window_event(self.window, event)
     }
+
+    fn on_resized(&mut self, event: &WindowResizeEvent) {}
+
+    pub fn add_listeners() {}
 }
 
-impl Layer for SfGuiLayer {
+impl<'a> Layer for SfGuiLayerCore<'a> {
     fn get_name(&mut self) -> &String {
         &self.name
     }
@@ -85,7 +128,7 @@ impl Layer for SfGuiLayer {
             "{}",
             format!("ON UPDATE IN SF_GUI: {:?}", SystemTime::now())
         );
-        let raw_input = self.egui_winit_state.take_egui_input(&self.window.borrow());
+        let raw_input = self.egui_winit_state.take_egui_input(self.window);
 
         let full_output = self.egui_context.run(raw_input, |ctx| {
             // This is where you define your egui UI
@@ -98,18 +141,18 @@ impl Layer for SfGuiLayer {
         });
 
         self.egui_winit_state
-            .handle_platform_output(&*self.window.borrow(), full_output.platform_output);
+            .handle_platform_output(self.window, full_output.platform_output);
 
-        let graphics_ref = self.graphics.borrow();
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             pixels_per_point: self.egui_context.pixels_per_point(),
             size_in_pixels: [
-                graphics_ref.surface_config.width,
-                graphics_ref.surface_config.height,
+                self.graphics.surface_config.width,
+                self.graphics.surface_config.height,
             ],
         };
 
-        let current_texture = graphics_ref
+        let current_texture = self
+            .graphics
             .surface
             .get_current_texture()
             .expect("egui renderer encoder");
@@ -117,26 +160,31 @@ impl Layer for SfGuiLayer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let encoder = graphics_ref
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Egui encoder"),
-            });
+        let mut encoder =
+            self.graphics
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Egui encoder"),
+                });
 
         for (id, image_delta) in &full_output.textures_delta.set {
             self.egui_renderer.update_texture(
-                &graphics_ref.device,
-                &graphics_ref.queue,
+                &self.graphics.device,
+                &self.graphics.queue,
                 *id,
                 image_delta,
             );
         }
 
+        let clipped_primitives: Vec<egui::ClippedPrimitive> = self
+            .egui_context
+            .tessellate(full_output.shapes, self.egui_context.pixels_per_point());
+
         self.egui_renderer.update_buffers(
-            &graphics_ref.device,
-            &graphics_ref.queue,
+            &self.graphics.device,
+            &self.graphics.queue,
             &mut encoder,
-            &full_output.shapes,
+            &clipped_primitives,
             &screen_descriptor,
         );
 
@@ -150,18 +198,24 @@ impl Layer for SfGuiLayer {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
-                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
-            self.egui_renderer
-                .render(render_pass, &full_output.shapes, &screen_descriptor);
+            let mut static_render_pass = render_pass.forget_lifetime();
+
+            self.egui_renderer.render(
+                &mut static_render_pass,
+                &clipped_primitives,
+                &screen_descriptor,
+            );
         }
 
-        graphics_ref.queue.submit(std::iter::once(encoder.finish()));
+        self.graphics
+            .queue
+            .submit(std::iter::once(encoder.finish()));
         current_texture.present();
 
         for id in &full_output.textures_delta.free {
@@ -175,5 +229,7 @@ impl Layer for SfGuiLayer {
                 self.on_window_event(e);
             }
         }
+
+        self.event_dispatcher.dispatch_dynamic(event);
     }
 }

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+env_logger="0.11"
+pollster="0.4"
 fern={version= "0.7.1", features = ["colored"]}
 humantime="2.2.0"
 log="0.4.27"
@@ -12,4 +14,4 @@ egui = "0.32.0"
 egui-winit = "0.32.0"
 egui-wgpu = "0.32.0"
 winit = { version = "*", features = ["rwh_05"] }
-wgpu ={ version ="*", features = ["webgpu", "webgl"]}
+wgpu ={ version ="25.0.*", features = ["webgpu", "webgl"]}

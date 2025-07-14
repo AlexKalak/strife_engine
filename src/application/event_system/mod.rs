@@ -16,7 +16,7 @@ pub struct EventSystem<'a> {
 }
 
 impl<'a> EventSystem<'a> {
-    pub fn new() -> EventSystem<'a> {
+    pub fn new() -> Self {
         Self {
             layer_stack: LayerStack::new(),
             non_layer_event_dispatcher: EventDispatcher::new(),

@@ -202,31 +202,27 @@ where
     }
 }
 
-pub struct WindowManager<H>
+pub struct WindowManager<'a, H>
 where
     H: WindowEventListener,
 {
     pub event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
-    window: Rc<RefCell<Window>>,
     event_loop: winit::event_loop::EventLoop<WindowManagerCustomEvent>,
     event_handler: WindowEventHandler<H>,
+    window: &'a Window,
 }
 
-impl<H> WindowManager<H>
+impl<'a, H> WindowManager<'a, H>
 where
     H: WindowEventListener,
 {
-    pub fn new(event_listener: Option<H>) -> WindowManager<H> {
+    pub fn new(
+        event_listener: Option<H>,
+        event_loop: EventLoop<WindowManagerCustomEvent>,
+        event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
+        window: &'a Window,
+    ) -> WindowManager<'a, H> {
         let event_handler = WindowEventHandler::new(event_listener);
-
-        let event_loop = EventLoop::<WindowManagerCustomEvent>::with_user_event()
-            .build()
-            .unwrap();
-
-        let event_loop_proxy = event_loop.create_proxy();
-        let window = Rc::new(RefCell::new(
-            event_loop.create_window(WindowAttributes::new()).unwrap(),
-        ));
 
         Self {
             window,
@@ -240,14 +236,10 @@ where
         self.event_handler.event_listener = event_listener;
     }
 
-    pub fn get_window_shared(&self) -> Rc<RefCell<Window>> {
-        Rc::clone(&self.window)
-    }
-
     pub fn run(mut self) {
         let _ = self.event_loop.run(move |event, elwt| {
             self.event_handler
-                .handle_window_event(&event, elwt, &self.window.borrow())
+                .handle_window_event(&event, elwt, self.window)
         });
     }
 }

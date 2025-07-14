@@ -1,14 +1,16 @@
+use std::{cell::RefCell, rc::Rc};
+
 use winit::{dpi::PhysicalSize, window::Window};
 
-pub struct WgpuGraphics {
+pub struct WgpuGraphics<'a> {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub surface: wgpu::Surface,
+    pub surface: wgpu::Surface<'a>,
     pub surface_config: wgpu::SurfaceConfiguration,
 }
 
-impl WgpuGraphics {
-    pub async fn new(window: &Window, size: PhysicalSize<u32>) -> Self {
+impl<'a> WgpuGraphics<'a> {
+    pub async fn new(window: &'a Window, size: PhysicalSize<u32>) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance.create_surface(window).unwrap();
 
@@ -21,13 +23,16 @@ impl WgpuGraphics {
             .await
             .unwrap();
 
-        let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("wgpu device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::default(),
-            memory_hints: Default::default(),
-            trace: None,
-        });
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("wgpu device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: Default::default(),
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
 
@@ -55,6 +60,14 @@ impl WgpuGraphics {
             queue,
             surface,
             surface_config,
+        }
+    }
+
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
+        if size.width > 0 && size.height > 0 {
+            self.surface_config.width = size.width;
+            self.surface_config.height = size.height;
+            self.surface.configure(&self.device, &self.surface_config);
         }
     }
 }

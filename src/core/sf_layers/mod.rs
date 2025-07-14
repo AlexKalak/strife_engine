@@ -6,7 +6,7 @@ pub struct LayerStack<'a> {
 }
 
 impl<'a> LayerStack<'a> {
-    pub fn new() -> LayerStack<'a> {
+    pub fn new() -> Self {
         Self {
             layers: Vec::new(),
             layer_insert_index: 0,
