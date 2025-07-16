@@ -16,10 +16,12 @@ use crate::{
     core::{
         sf_events::{EventListener, Eventable, MouseMoveEvent},
         sf_graphics,
-        sf_gui::{self, SfGuiLayer},
+        sf_gui::{self, SfGuiLayerWrapper},
         sf_layers::Layer,
     },
-    sf_window::{self, WindowManager, WindowManagerCustomEvent},
+    sf_window::{
+        self, RawWindowHandleWrapper, WindowManager, WindowManagerCustomEvent, WindowWrapper,
+    },
 };
 
 pub mod event_system;
@@ -58,30 +60,36 @@ pub async fn run() {
     let event_loop_proxy = event_loop.create_proxy();
 
     let window = event_loop.create_window(WindowAttributes::new()).unwrap();
+    let window_wrapper = WindowWrapper::new(window);
+    let raw_window_handle_wrapper = RawWindowHandleWrapper::new(&window_wrapper).unwrap();
 
-    let mut window_manager = sf_window::WindowManager::<EventListenerForWindow>::new(
-        None,
-        event_loop,
-        event_loop_proxy,
-        &window,
-    );
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let surface = instance
+        .create_surface(raw_window_handle_wrapper.get_window_handle())
+        .unwrap();
+
+    //let mut window_manager = sf_window::WindowManager::<EventListenerForWindow>::new(
+    //    None,
+    //    event_loop,
+    //    event_loop_proxy,
+    //    window.clone(),
+    //);
 
     event_system
         .non_layer_event_dispatcher
         .add_listener(MouseMoveListener);
 
-    let graphics = sf_graphics::wgpu_backend::WgpuGraphics::new(&window, window.inner_size()).await;
+    let inner_size = window.inner_size();
+    let graphics = Rc::new(RefCell::new(
+        sf_graphics::wgpu_backend::WgpuGraphics::new(instance, surface, inner_size).await,
+    ));
 
-    let mut sf_gui_layer = SfGuiLayer::new("hello".to_string(), &window, &graphics);
+    let mut sf_gui_layer = Box::new(SfGuiLayerWrapper::new(
+        "hello".to_string(),
+        &window,
+        graphics.clone(),
+    ));
 
-    event_system
-        .layer_stack
-        .push_overlay(&mut (*sf_gui_layer.get_layer().borrow_mut()));
-
-    let window_event_listener = EventListenerForWindow {
-        event_sys: &mut event_system,
-    };
-
-    window_manager.set_event_listener(Some(window_event_listener));
-    window_manager.run();
+    sf_gui_layer.get_name();
+    event_system.layer_stack.push_layer(sf_gui_layer);
 }

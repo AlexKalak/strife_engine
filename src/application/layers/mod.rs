@@ -6,9 +6,9 @@ use crate::{
     info_client, info_core,
 };
 
-pub struct TestLayer {
+pub struct TestLayer<'a> {
     pub name: String,
-    pub event_dispatcher: EventDispatcher,
+    pub event_dispatcher: EventDispatcher<'a>,
     pub mouse_x: f64,
     pub mouse_y: f64,
 }
@@ -31,8 +31,8 @@ impl EventListener for TestMouseMoveListenerWithLayerName {
     }
 }
 
-impl TestLayer {
-    pub fn new(name: &String) -> TestLayer {
+impl<'a> TestLayer<'a> {
+    pub fn new(name: &String) -> Self {
         let mut event_dispatcher = EventDispatcher::new();
         event_dispatcher.add_listener(TestMouseMoveListenerWithLayerName {
             layer_name: name.clone(),
@@ -47,7 +47,7 @@ impl TestLayer {
     }
 }
 
-impl sf_layers::Layer for TestLayer {
+impl<'a> sf_layers::Layer for TestLayer<'a> {
     fn get_name(&mut self) -> &String {
         &self.name
     }

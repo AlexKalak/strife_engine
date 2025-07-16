@@ -1,11 +1,11 @@
 use super::sf_events::Eventable;
 
-pub struct LayerStack<'a> {
-    pub layers: Vec<&'a mut dyn Layer>,
+pub struct LayerStack {
+    pub layers: Vec<Box<dyn Layer>>,
     layer_insert_index: usize,
 }
 
-impl<'a> LayerStack<'a> {
+impl LayerStack {
     pub fn new() -> Self {
         Self {
             layers: Vec::new(),
@@ -13,11 +13,11 @@ impl<'a> LayerStack<'a> {
         }
     }
 
-    pub fn push_layer(&mut self, layer: &'a mut dyn Layer) {
+    pub fn push_layer(&mut self, layer: Box<dyn Layer>) {
         self.layers.insert(self.layer_insert_index, layer);
         self.layer_insert_index += 1;
     }
-    pub fn push_overlay(&mut self, overlay: &'a mut dyn Layer) {
+    pub fn push_overlay(&mut self, overlay: Box<dyn Layer>) {
         self.layers.push(overlay);
     }
 

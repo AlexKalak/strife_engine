@@ -2,18 +2,19 @@ use std::{cell::RefCell, rc::Rc};
 
 use winit::{dpi::PhysicalSize, window::Window};
 
-pub struct WgpuGraphics<'a> {
+pub struct WgpuGraphics {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub surface: wgpu::Surface<'a>,
+    pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
 }
 
-impl<'a> WgpuGraphics<'a> {
-    pub async fn new(window: &'a Window, size: PhysicalSize<u32>) -> Self {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-        let surface = instance.create_surface(window).unwrap();
-
+impl WgpuGraphics {
+    pub async fn new(
+        instance: wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        size: PhysicalSize<u32>,
+    ) -> Self {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),

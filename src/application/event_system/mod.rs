@@ -11,8 +11,8 @@ use crate::{
 };
 
 pub struct EventSystem<'a> {
-    pub layer_stack: LayerStack<'a>,
-    pub non_layer_event_dispatcher: EventDispatcher,
+    pub layer_stack: LayerStack,
+    pub non_layer_event_dispatcher: EventDispatcher<'a>,
 }
 
 impl<'a> EventSystem<'a> {

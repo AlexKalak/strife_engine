@@ -16,7 +16,7 @@ pub enum EventCategory {
     MouseButtonCategory = 1 << 4,
     UserCategory = 1 << 5,
 }
-pub trait Eventable: Any + Send + Sync + 'static {
+pub trait Eventable: Any + 'static {
     fn get_name(&self) -> &str;
 
     fn to_string(&self) -> String {
@@ -39,13 +39,13 @@ pub trait EventListener {
     fn handle(&mut self, event: &Self::EventableConcreteType) -> bool;
 }
 
-pub trait AnyListener: Send + Sync {
+pub trait AnyListener {
     fn handle_erased(&mut self, payload: &dyn Eventable) -> bool;
 }
 
-impl<L> AnyListener for L
+impl<'a, L> AnyListener for L
 where
-    L: EventListener + 'static + Send + Sync,
+    L: EventListener + 'a,
 {
     fn handle_erased(&mut self, payload: &dyn Eventable) -> bool {
         if let Some(concrete_payload) =
@@ -59,19 +59,33 @@ where
     }
 }
 
-pub struct EventDispatcher {
-    event_listeners: HashMap<TypeId, Vec<Box<dyn AnyListener>>>,
+pub struct EventListenerStruct<E> {
+    callback: Box<dyn Fn(&E) -> bool + Send + 'static>,
+}
+impl<E> EventListener for EventListenerStruct<E>
+where
+    E: Eventable,
+{
+    type EventableConcreteType = E;
+
+    fn handle(&mut self, event: &Self::EventableConcreteType) -> bool {
+        (self.callback)(event)
+    }
 }
 
-impl EventDispatcher {
-    pub fn new() -> EventDispatcher {
+pub struct EventDispatcher<'a> {
+    event_listeners: HashMap<TypeId, Vec<Box<dyn AnyListener + 'a>>>,
+}
+
+impl<'a> EventDispatcher<'a> {
+    pub fn new() -> EventDispatcher<'a> {
         Self {
             event_listeners: HashMap::new(),
         }
     }
     pub fn add_listener<L>(&mut self, listener: L)
     where
-        L: EventListener + 'static + Send + Sync,
+        L: EventListener + 'a,
     {
         let type_id = std::any::TypeId::of::<L::EventableConcreteType>();
         self.event_listeners

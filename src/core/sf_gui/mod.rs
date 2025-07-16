@@ -19,57 +19,81 @@ use super::{
     sf_layers::Layer,
 };
 
-pub struct SfGuiLayer<'a> {
-    sf_gui_layer_core: Rc<RefCell<SfGuiLayerCore<'a>>>,
-    sf_gui_window_resize_listener: SfGuiWindowResizeListener<'a>,
+pub struct SfGuiLayerWrapper<'a> {
+    name: String,
+    sf_gui_layer_rc: Rc<RefCell<SfGuiLayer<'a>>>,
+    event_dispatcher: EventDispatcher<'a>,
 }
 
-impl<'a> SfGuiLayer<'a> {
-    pub fn new(name: String, window: &'a Window, graphics: &'a WgpuGraphics<'a>) -> Self {
-        let sf_gui_layer_core_rc =
-            Rc::new(RefCell::new(SfGuiLayerCore::new(name, window, graphics)));
+impl<'a> SfGuiLayerWrapper<'a> {
+    pub fn new(name: String, window: &'a Window, graphics: Rc<RefCell<WgpuGraphics<'a>>>) -> Self {
+        let sf_gui_layer_rc = Rc::new(RefCell::new(SfGuiLayer::new(window, graphics)));
+        let sf_gui_layer_rc2 = sf_gui_layer_rc.clone();
+        let mut event_dispatcher = EventDispatcher::new();
 
-        let sf_gui_window_resize_listener = SfGuiWindowResizeListener {
-            sf_gui_layer_core: sf_gui_layer_core_rc.clone(),
+        let window_resize_listener = SfGuiWindowResizeListener {
+            callback: Box::new(move |event| {
+                (*sf_gui_layer_rc2.borrow_mut()).on_resized(event);
+                false
+            }),
         };
+        event_dispatcher.add_listener(window_resize_listener);
 
         Self {
-            sf_gui_layer_core: sf_gui_layer_core_rc.clone(),
-            sf_gui_window_resize_listener,
+            name,
+            sf_gui_layer_rc: sf_gui_layer_rc.clone(),
+            event_dispatcher,
         }
     }
+}
 
-    pub fn get_layer(&mut self) -> Rc<RefCell<SfGuiLayerCore<'a>>> {
-        self.sf_gui_layer_core.clone()
+impl<'a> Layer for SfGuiLayerWrapper<'a> {
+    fn get_name(&mut self) -> &String {
+        &self.name
+    }
+
+    fn on_attach(&mut self) {
+        todo!()
+    }
+
+    fn on_detach(&mut self) {
+        todo!()
+    }
+
+    fn on_update(&mut self) {
+        todo!()
+    }
+
+    fn on_event(&mut self, event: &dyn super::sf_events::Eventable) {
+        if event.type_id() == TypeId::of::<WindowEvent>() {
+            if let Some(e) = (event as &dyn Any).downcast_ref::<WindowEvent>() {
+                self.sf_gui_layer_rc.borrow_mut().on_window_event(e);
+            }
+        }
     }
 }
 
 struct SfGuiWindowResizeListener<'a> {
-    sf_gui_layer_core: Rc<RefCell<SfGuiLayerCore<'a>>>,
+    callback: Box<dyn Fn(&WindowResizeEvent) -> bool + 'a>,
 }
 impl<'a> EventListener for SfGuiWindowResizeListener<'a> {
     type EventableConcreteType = WindowResizeEvent;
 
     fn handle(&mut self, event: &Self::EventableConcreteType) -> bool {
-        (*self.sf_gui_layer_core.borrow())
-            .egui_context
-            .set_pixels_per_point((*self.sf_gui_layer_core.borrow()).window.scale_factor() as f32);
-        false
+        (self.callback)(event)
     }
 }
 
-struct SfGuiLayerCore<'a> {
-    name: String,
-    graphics: &'a WgpuGraphics<'a>,
+struct SfGuiLayer<'a> {
+    graphics: Rc<RefCell<WgpuGraphics<'a>>>,
     window: &'a Window,
     egui_context: egui::Context,
     egui_winit_state: egui_winit::State,
     egui_renderer: egui_wgpu::Renderer,
-    event_dispatcher: EventDispatcher,
 }
 
-impl<'a> SfGuiLayerCore<'a> {
-    pub fn new(name: String, window: &'a Window, graphics: &'a WgpuGraphics<'a>) -> Self {
+impl<'a> SfGuiLayer<'a> {
+    pub fn new(window: &'a Window, graphics: Rc<RefCell<WgpuGraphics<'a>>>) -> Self {
         let egui_context = egui::Context::default();
 
         let egui_winit_state = State::new(
@@ -81,24 +105,22 @@ impl<'a> SfGuiLayerCore<'a> {
             None,
         );
 
+        let graphics_ref = graphics.borrow();
+
         let egui_renderer = Renderer::new(
-            &graphics.device,
-            graphics.surface_config.format,
+            &graphics_ref.device,
+            graphics_ref.surface_config.format,
             None,
             1,
             false,
         );
 
-        let event_dispatcher = EventDispatcher::new();
-
         Self {
-            name,
             window,
-            graphics,
+            graphics: graphics.clone(),
             egui_context,
             egui_winit_state,
             egui_renderer,
-            event_dispatcher,
         }
     }
 
@@ -110,14 +132,6 @@ impl<'a> SfGuiLayerCore<'a> {
     }
 
     fn on_resized(&mut self, event: &WindowResizeEvent) {}
-
-    pub fn add_listeners() {}
-}
-
-impl<'a> Layer for SfGuiLayerCore<'a> {
-    fn get_name(&mut self) -> &String {
-        &self.name
-    }
 
     fn on_attach(&mut self) {}
 
@@ -221,15 +235,5 @@ impl<'a> Layer for SfGuiLayerCore<'a> {
         for id in &full_output.textures_delta.free {
             self.egui_renderer.free_texture(id);
         }
-    }
-
-    fn on_event(&mut self, event: &dyn super::sf_events::Eventable) {
-        if event.type_id() == TypeId::of::<WindowEvent>() {
-            if let Some(e) = (event as &dyn Any).downcast_ref::<WindowEvent>() {
-                self.on_window_event(e);
-            }
-        }
-
-        self.event_dispatcher.dispatch_dynamic(event);
     }
 }

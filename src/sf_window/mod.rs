@@ -1,7 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{any::Any, cell::RefCell, marker::PhantomData, ops::Deref, rc::Rc, sync::Arc};
 
 use egui::ViewportId;
 use egui_winit::State;
+use wgpu::rwh::{HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle};
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     error::EventLoopError,
@@ -16,6 +17,47 @@ use crate::core::sf_events::{
     MouseButtonReleasedEvent, MouseMoveEvent, WindowCloseEvent, WindowRedrawRequestedEvent,
     WindowResizeEvent,
 };
+
+pub struct WindowWrapper<W> {
+    reference: Arc<dyn Any + Send + Sync>,
+    ty: PhantomData<W>,
+}
+impl<W: Send + Sync + 'static> WindowWrapper<W> {
+    /// Creates a `WindowWrapper` from a window.
+    pub fn new(window: W) -> WindowWrapper<W> {
+        WindowWrapper {
+            reference: Arc::new(window),
+            ty: PhantomData,
+        }
+    }
+}
+impl<W: 'static> Deref for WindowWrapper<W> {
+    type Target = W;
+
+    fn deref(&self) -> &Self::Target {
+        self.reference.downcast_ref::<W>().unwrap()
+    }
+}
+
+pub struct RawWindowHandleWrapper {
+    _window: Arc<dyn Any + Send + Sync>,
+    window_handle: RawWindowHandle,
+}
+
+impl RawWindowHandleWrapper {
+    pub fn new<W: HasWindowHandle + HasDisplayHandle + 'static>(
+        window: &WindowWrapper<W>,
+    ) -> Result<RawWindowHandleWrapper, HandleError> {
+        Ok(RawWindowHandleWrapper {
+            _window: window.reference.clone(),
+            window_handle: window.window_handle()?.as_raw(),
+        })
+    }
+    /// Gets the stored window handle.
+    pub fn get_window_handle(&self) -> RawWindowHandle {
+        self.window_handle
+    }
+}
 
 pub enum WindowManagerCustomEvent {
     TerminateWindow,
@@ -202,17 +244,17 @@ where
     }
 }
 
-pub struct WindowManager<'a, H>
+pub struct WindowManager<H>
 where
     H: WindowEventListener,
 {
     pub event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
     event_loop: winit::event_loop::EventLoop<WindowManagerCustomEvent>,
     event_handler: WindowEventHandler<H>,
-    window: &'a Window,
+    window: Rc<RefCell<Window>>,
 }
 
-impl<'a, H> WindowManager<'a, H>
+impl<H> WindowManager<H>
 where
     H: WindowEventListener,
 {
@@ -220,8 +262,8 @@ where
         event_listener: Option<H>,
         event_loop: EventLoop<WindowManagerCustomEvent>,
         event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
-        window: &'a Window,
-    ) -> WindowManager<'a, H> {
+        window: Rc<RefCell<Window>>,
+    ) -> Self {
         let event_handler = WindowEventHandler::new(event_listener);
 
         Self {
@@ -239,7 +281,7 @@ where
     pub fn run(mut self) {
         let _ = self.event_loop.run(move |event, elwt| {
             self.event_handler
-                .handle_window_event(&event, elwt, self.window)
+                .handle_window_event(&event, elwt, &self.window.borrow())
         });
     }
 }
