@@ -1,32 +1,34 @@
-use core::{borrow, time};
+pub mod gui_widgets;
+
 use std::{
     any::{Any, TypeId},
-    cell::{Ref, RefCell},
+    cell::RefCell,
     rc::Rc,
-    time::SystemTime,
+    sync::Arc,
+    time::{Duration, SystemTime},
 };
 
-use egui::{CentralPanel, FullOutput};
-use egui_wgpu::Renderer;
+use egui::{CentralPanel, FullOutput, RawInput};
+use egui_wgpu::{Renderer, ScreenDescriptor};
 use egui_winit::{EventResponse, State, winit::window::Window};
-use winit::{event::WindowEvent, window::WindowId};
-
-use crate::{info_core, warn_core};
+use gui_widgets::WorldRenderWidget;
+use winit::event::WindowEvent;
 
 use super::{
     sf_events::{EventDispatcher, EventListener, WindowResizeEvent},
     sf_graphics::wgpu_backend::WgpuGraphics,
     sf_layers::Layer,
+    world::World,
 };
 
 pub struct SfGuiLayerWrapper<'a> {
     name: String,
-    sf_gui_layer_rc: Rc<RefCell<SfGuiLayer<'a>>>,
+    sf_gui_layer_rc: Rc<RefCell<SfGuiLayer>>,
     event_dispatcher: EventDispatcher<'a>,
 }
 
 impl<'a> SfGuiLayerWrapper<'a> {
-    pub fn new(name: String, window: &'a Window, graphics: Rc<RefCell<WgpuGraphics<'a>>>) -> Self {
+    pub fn new(name: String, window: Arc<Window>, graphics: Rc<RefCell<WgpuGraphics>>) -> Self {
         let sf_gui_layer_rc = Rc::new(RefCell::new(SfGuiLayer::new(window, graphics)));
         let sf_gui_layer_rc2 = sf_gui_layer_rc.clone();
         let mut event_dispatcher = EventDispatcher::new();
@@ -61,7 +63,7 @@ impl<'a> Layer for SfGuiLayerWrapper<'a> {
     }
 
     fn on_update(&mut self) {
-        todo!()
+        self.sf_gui_layer_rc.borrow_mut().on_update();
     }
 
     fn on_event(&mut self, event: &dyn super::sf_events::Eventable) {
@@ -70,6 +72,7 @@ impl<'a> Layer for SfGuiLayerWrapper<'a> {
                 self.sf_gui_layer_rc.borrow_mut().on_window_event(e);
             }
         }
+        self.event_dispatcher.dispatch_dynamic(event);
     }
 }
 
@@ -84,22 +87,31 @@ impl<'a> EventListener for SfGuiWindowResizeListener<'a> {
     }
 }
 
-struct SfGuiLayer<'a> {
-    graphics: Rc<RefCell<WgpuGraphics<'a>>>,
-    window: &'a Window,
+struct SfGuiLayer {
+    graphics: Rc<RefCell<WgpuGraphics>>,
+    window: Arc<Window>,
     egui_context: egui::Context,
     egui_winit_state: egui_winit::State,
-    egui_renderer: egui_wgpu::Renderer,
+    egui_renderer: Rc<RefCell<egui_wgpu::Renderer>>,
+    //tmp
+    last_fps_check_time: SystemTime,
+    last_frame_time: SystemTime,
+    frames_count: u64,
+    fps_count: u64,
+    max_frame_time_for_second: Duration,
+    //tmp
+    world: World,
+    world_renderer_widget: WorldRenderWidget,
 }
 
-impl<'a> SfGuiLayer<'a> {
-    pub fn new(window: &'a Window, graphics: Rc<RefCell<WgpuGraphics<'a>>>) -> Self {
+impl SfGuiLayer {
+    pub fn new(window: Arc<Window>, graphics: Rc<RefCell<WgpuGraphics>>) -> Self {
         let egui_context = egui::Context::default();
 
         let egui_winit_state = State::new(
             egui_context.clone(),
             egui_context.viewport_id(),
-            window,
+            &window,
             None,
             None,
             None,
@@ -107,13 +119,15 @@ impl<'a> SfGuiLayer<'a> {
 
         let graphics_ref = graphics.borrow();
 
-        let egui_renderer = Renderer::new(
+        let egui_renderer = Rc::new(RefCell::new(Renderer::new(
             &graphics_ref.device,
             graphics_ref.surface_config.format,
             None,
             1,
             false,
-        );
+        )));
+
+        let world_renderer_widget = WorldRenderWidget::new((100, 100), graphics.clone());
 
         Self {
             window,
@@ -121,6 +135,13 @@ impl<'a> SfGuiLayer<'a> {
             egui_context,
             egui_winit_state,
             egui_renderer,
+            last_frame_time: SystemTime::now(),
+            last_fps_check_time: SystemTime::now(),
+            frames_count: 0,
+            fps_count: 0,
+            max_frame_time_for_second: Duration::new(0, 0),
+            world: World::new(graphics.clone()),
+            world_renderer_widget,
         }
     }
 
@@ -128,88 +149,164 @@ impl<'a> SfGuiLayer<'a> {
         &mut self,
         event: &egui_winit::winit::event::WindowEvent,
     ) -> EventResponse {
-        self.egui_winit_state.on_window_event(self.window, event)
+        self.egui_winit_state.on_window_event(&self.window, event)
     }
 
-    fn on_resized(&mut self, event: &WindowResizeEvent) {}
+    fn on_resized(&mut self, event: &WindowResizeEvent) {
+        self.egui_context
+            .set_pixels_per_point(self.window.scale_factor() as f32);
+
+        let (width, height) = event.get_width_and_height();
+        self.graphics
+            .borrow_mut()
+            .resize(winit::dpi::PhysicalSize { width, height });
+        let graphics = self.graphics.borrow();
+        self.world_renderer_widget.update_size(
+            &graphics,
+            ((width as f32 * 0.5) as u32, (height as f32 * 0.5) as u32),
+        );
+    }
 
     fn on_attach(&mut self) {}
 
     fn on_detach(&mut self) {}
 
     fn on_update(&mut self) {
-        info_core!(
-            "{}",
-            format!("ON UPDATE IN SF_GUI: {:?}", SystemTime::now())
-        );
-        let raw_input = self.egui_winit_state.take_egui_input(self.window);
+        self.update_fps();
+        self.update_gui();
+    }
 
-        let full_output = self.egui_context.run(raw_input, |ctx| {
-            // This is where you define your egui UI
-            CentralPanel::default().show(ctx, |ui| {
-                ui.heading("Hello egui!");
-                if ui.button("Click me!").clicked() {
-                    println!("Button clicked!");
-                }
-            });
-        });
+    fn update_fps(&mut self) {
+        self.frames_count += 1;
 
-        self.egui_winit_state
-            .handle_platform_output(self.window, full_output.platform_output);
+        let now = SystemTime::now();
+        let duration_from_last_frame = now.duration_since(self.last_frame_time).unwrap();
+        let duration_from_last_fps_check = now.duration_since(self.last_fps_check_time).unwrap();
+
+        if duration_from_last_frame > self.max_frame_time_for_second {
+            self.max_frame_time_for_second = duration_from_last_frame
+        }
+        if duration_from_last_fps_check > Duration::from_secs(1) {
+            self.fps_count = self.frames_count;
+            self.frames_count = 0;
+            self.max_frame_time_for_second = Duration::new(0, 0);
+            self.last_fps_check_time = now;
+        }
+        self.last_frame_time = now;
+    }
+
+    fn update_gui(&mut self) {
+        let raw_input = self.egui_winit_state.take_egui_input(&self.window);
+        let graphics = self.graphics.borrow();
 
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             pixels_per_point: self.egui_context.pixels_per_point(),
             size_in_pixels: [
-                self.graphics.surface_config.width,
-                self.graphics.surface_config.height,
+                graphics.surface_config.width,
+                graphics.surface_config.height,
             ],
         };
 
-        let current_texture = self
-            .graphics
+        let current_texture = graphics
             .surface
             .get_current_texture()
             .expect("egui renderer encoder");
+
         let view = current_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder =
-            self.graphics
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Egui encoder"),
+        let (surface_width, surface_height) = (
+            graphics.surface_config.width,
+            graphics.surface_config.height,
+        );
+
+        let texture_width = surface_width as f32 * 0.5;
+        let texture_height = surface_height;
+
+        drop(graphics);
+
+        self.present_gui_output(screen_descriptor, raw_input, &view);
+        current_texture.present();
+    }
+
+    fn get_frame_output(&self, raw_input: RawInput) -> FullOutput {
+        let fps = self.fps_count;
+        let max_frame_time = self.max_frame_time_for_second;
+
+        let full_output = self.egui_context.run(raw_input, |ctx| {
+            // This is where you define your egui UI
+            CentralPanel::default().show(ctx, move |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.heading(format!("FPS: {}", fps));
+                        ui.heading(format!("MAX: {:?}", max_frame_time));
+                        if ui.button("Click me!").clicked() {
+                            println!("Button clicked!");
+                        }
+                    });
+
+                    ui.vertical(|ui| {
+                        ui.heading("render");
+                        self.world_renderer_widget
+                            .ui(ui, &self.world, self.egui_renderer.clone())
+                    });
+
+                    ui.vertical(|ui| {
+                        ui.heading("Hello second vertical");
+                        if ui.button("Click me!").clicked() {
+                            println!("Button clicked!");
+                        }
+                    });
                 });
+            });
+        });
+        full_output
+    }
+
+    fn present_gui_output(
+        &mut self,
+        screen_descriptor: ScreenDescriptor,
+        raw_input: RawInput,
+        surface_view: &wgpu::TextureView,
+    ) {
+        let graphics = self.graphics.borrow();
+        let full_output = self.get_frame_output(raw_input);
+        let mut egui_renderer = self.egui_renderer.borrow_mut();
+
+        let mut encoder = graphics
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Egui encoder"),
+            });
+
+        self.egui_winit_state
+            .handle_platform_output(&self.window, full_output.platform_output);
 
         for (id, image_delta) in &full_output.textures_delta.set {
-            self.egui_renderer.update_texture(
-                &self.graphics.device,
-                &self.graphics.queue,
-                *id,
-                image_delta,
-            );
+            egui_renderer.update_texture(&graphics.device, &graphics.queue, *id, image_delta);
         }
 
         let clipped_primitives: Vec<egui::ClippedPrimitive> = self
             .egui_context
             .tessellate(full_output.shapes, self.egui_context.pixels_per_point());
 
-        self.egui_renderer.update_buffers(
-            &self.graphics.device,
-            &self.graphics.queue,
+        egui_renderer.update_buffers(
+            &graphics.device,
+            &graphics.queue,
             &mut encoder,
             &clipped_primitives,
             &screen_descriptor,
         );
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &surface_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -220,20 +317,17 @@ impl<'a> SfGuiLayer<'a> {
 
             let mut static_render_pass = render_pass.forget_lifetime();
 
-            self.egui_renderer.render(
+            egui_renderer.render(
                 &mut static_render_pass,
                 &clipped_primitives,
                 &screen_descriptor,
             );
         }
+        graphics.queue.submit(std::iter::once(encoder.finish()));
 
-        self.graphics
-            .queue
-            .submit(std::iter::once(encoder.finish()));
-        current_texture.present();
-
+        // self.egui_renderer.free_texture(&egui_texture_id);
         for id in &full_output.textures_delta.free {
-            self.egui_renderer.free_texture(id);
+            egui_renderer.free_texture(id);
         }
     }
 }

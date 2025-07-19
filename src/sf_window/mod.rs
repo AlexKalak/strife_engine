@@ -1,8 +1,18 @@
-use std::{any::Any, cell::RefCell, marker::PhantomData, ops::Deref, rc::Rc, sync::Arc};
+use std::{
+    any::Any,
+    cell::RefCell,
+    marker::PhantomData,
+    ops::Deref,
+    path::Component,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use egui::ViewportId;
 use egui_winit::State;
-use wgpu::rwh::{HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle};
+use wgpu::rwh::{
+    HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
+};
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     error::EventLoopError,
@@ -12,10 +22,13 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::core::sf_events::{
-    self, Event, Eventable, KeyPressedEvent, KeyReleasedEvent, MouseButtonPressedEvent,
-    MouseButtonReleasedEvent, MouseMoveEvent, WindowCloseEvent, WindowRedrawRequestedEvent,
-    WindowResizeEvent,
+use crate::{
+    core::sf_events::{
+        self, Event, Eventable, KeyPressedEvent, KeyReleasedEvent, MouseButtonPressedEvent,
+        MouseButtonReleasedEvent, MouseMoveEvent, WindowCloseEvent, WindowRedrawRequestedEvent,
+        WindowResizeEvent,
+    },
+    info_core,
 };
 
 pub struct WindowWrapper<W> {
@@ -24,9 +37,9 @@ pub struct WindowWrapper<W> {
 }
 impl<W: Send + Sync + 'static> WindowWrapper<W> {
     /// Creates a `WindowWrapper` from a window.
-    pub fn new(window: W) -> WindowWrapper<W> {
+    pub fn new(window: Arc<W>) -> WindowWrapper<W> {
         WindowWrapper {
-            reference: Arc::new(window),
+            reference: window.clone(),
             ty: PhantomData,
         }
     }
@@ -39,9 +52,11 @@ impl<W: 'static> Deref for WindowWrapper<W> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct RawWindowHandleWrapper {
     _window: Arc<dyn Any + Send + Sync>,
     window_handle: RawWindowHandle,
+    display_handle: RawDisplayHandle,
 }
 
 impl RawWindowHandleWrapper {
@@ -51,13 +66,42 @@ impl RawWindowHandleWrapper {
         Ok(RawWindowHandleWrapper {
             _window: window.reference.clone(),
             window_handle: window.window_handle()?.as_raw(),
+            display_handle: window.display_handle()?.as_raw(),
         })
     }
-    /// Gets the stored window handle.
+
     pub fn get_window_handle(&self) -> RawWindowHandle {
         self.window_handle
     }
+    pub fn get_displat_handle(&self) -> RawDisplayHandle {
+        self.display_handle
+    }
+
+    /// Gets the stored window handle.
+    pub fn get_handle(&self) -> ThreadLockedRawWindowHandleWrapper {
+        ThreadLockedRawWindowHandleWrapper(self.clone())
+    }
 }
+
+unsafe impl Send for RawWindowHandleWrapper {}
+unsafe impl Sync for RawWindowHandleWrapper {}
+
+pub struct ThreadLockedRawWindowHandleWrapper(RawWindowHandleWrapper);
+
+impl HasWindowHandle for ThreadLockedRawWindowHandleWrapper {
+    fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, HandleError> {
+        Ok(unsafe { WindowHandle::borrow_raw(self.0.window_handle) })
+    }
+}
+
+impl HasDisplayHandle for ThreadLockedRawWindowHandleWrapper {
+    fn display_handle(&self) -> Result<wgpu::rwh::DisplayHandle<'_>, HandleError> {
+        Ok(unsafe { wgpu::rwh::DisplayHandle::borrow_raw(self.0.display_handle) })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RawHandleWrapperHolder(pub Arc<Mutex<Option<RawWindowHandleWrapper>>>);
 
 pub enum WindowManagerCustomEvent {
     TerminateWindow,
@@ -251,7 +295,7 @@ where
     pub event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
     event_loop: winit::event_loop::EventLoop<WindowManagerCustomEvent>,
     event_handler: WindowEventHandler<H>,
-    window: Rc<RefCell<Window>>,
+    window: Arc<Window>,
 }
 
 impl<H> WindowManager<H>
@@ -262,7 +306,7 @@ where
         event_listener: Option<H>,
         event_loop: EventLoop<WindowManagerCustomEvent>,
         event_loop_proxy: EventLoopProxy<WindowManagerCustomEvent>,
-        window: Rc<RefCell<Window>>,
+        window: Arc<Window>,
     ) -> Self {
         let event_handler = WindowEventHandler::new(event_listener);
 
@@ -281,7 +325,7 @@ where
     pub fn run(mut self) {
         let _ = self.event_loop.run(move |event, elwt| {
             self.event_handler
-                .handle_window_event(&event, elwt, &self.window.borrow())
+                .handle_window_event(&event, elwt, &self.window)
         });
     }
 }
